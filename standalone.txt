@@ -1,0 +1,21 @@
+# Overworld installed by overworld_install.lua (pastebin run <code>): the files it needs, read by
+# ow/lib/standalone_update.lua at the commit it installs or updates to. "file <repo path> <install path>";
+# "keep" files are written only when missing and never deleted. Files that leave this list are deleted from installs
+# at their next update. overworld-save/ (games, characters, settings, scores) is never listed, so updates never touch it.
+# tests/install.test.lua checks every repo path here exists.
+program overworld
+file overworld.lua overworld.lua
+file startup.lua overworld_startup.lua
+file ow/util.lua ow/util.lua
+file ow/text.lua ow/text.lua
+file ow/game.lua ow/game.lua
+file ow/ui.lua ow/ui.lua
+file ow/storage.lua ow/storage.lua
+file ow/app.lua ow/app.lua
+file ow/data/world.lua ow/data/world.lua
+file ow/data/presets.lua ow/data/presets.lua
+file ow/lang/en.lua ow/lang/en.lua
+file ow/lang/de.lua ow/lang/de.lua
+file ow/lang/en_cc.lua ow/lang/en_cc.lua
+file ow/lang/de_cc.lua ow/lang/de_cc.lua
+file ow/lib/standalone_update.lua ow/lib/standalone_update.lua
