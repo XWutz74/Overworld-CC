@@ -41,7 +41,7 @@ if autoupdate then
     -- "Updated to abc1234" on the title screen, once
     local okS, st = pcall(updater.readState, updaterOpts)
     if okS and st.commit and st.updatedAt and st.noted ~= st.commit then
-      notice = "Updated to " .. st.commit:sub(1, 7)
+      notice = (st.previous and "Updated to " or "Installed ") .. st.commit:sub(1, 7)
       st.noted = st.commit
       pcall(updater.writeState, updaterOpts, st)
     end
