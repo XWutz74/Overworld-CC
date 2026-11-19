@@ -33,6 +33,11 @@ set overworld.autoupdate false
 
 (`set overworld.autoupdate true` switches them back on.) `overworld.log` notes what the updater did.
 
+If the Java of a Minecraft client does not trust the certificate of `api.github.com` ("Could not create a secure
+connection"), the installer and updater fall back to `version.txt` in this repository, which names the current version
+(a fingerprint of the game's files), and download the files from the branch itself. Maintainers: run `tools/stamp.sh`
+before every commit and commit `version.txt` with it.
+
 ## Playing
 
 Without the installer: copy `overworld.lua` and the `ow` folder onto a computer and run `overworld`

@@ -29,6 +29,7 @@ M.OWNER, M.REPO, M.BRANCH = "XWutz74", "Overworld-CC", "main"
 M.INTERVAL = 30 * 60      -- seconds between two checks of main
 M.BACKOFF_MAX = 6 * 3600  -- the longest wait after failures
 M.STAGE = ".overworld_update" -- the staging folder
+M.VERSION_FILE = "version.txt" -- on the branch: names the version when GitHub's API cannot be reached
 M.TRIES = 3               -- for a download that gets no answer at all
 M.MARGIN = 4000           -- bytes kept free beyond what an update needs (saves and logs still have to fit)
 
@@ -187,13 +188,24 @@ local function fetch(o, url, headers)
   return nil, err, code
 end
 
---- The commit main is at: a 40-character sha, or nil, err, code.
+--- The version main is at: version, ref (the commit's sha and the same sha to download from), or nil, err, code.
+-- GitHub's API says the commit. When the API cannot be reached (an old Java that does not trust its certificate, a
+-- proxy, the rate limit), the branch's own version.txt names the version (a fingerprint of the game's files, stamped by
+-- tools/stamp.sh at every commit), and the files are then downloaded from the branch itself: ref is "main".
 function M.latest(o)
   local data, err, code = fetch(o, apiUrl(o), { ["Accept"] = "application/vnd.github.sha", ["User-Agent"] = "overworld-cc-update" })
-  if not data then return nil, err, code end
-  local sha = data:match("^%s*(%x+)%s*$")
-  if not sha or #sha ~= 40 then return nil, "odd answer from GitHub" end
-  return sha:lower()
+  if data then
+    local sha = data:match("^%s*(%x+)%s*$")
+    if sha and #sha == 40 then return sha:lower(), sha:lower() end
+    err = "odd answer from GitHub"
+  end
+  local text = fetch(o, rawUrl(o, M.BRANCH, M.VERSION_FILE))
+  local v = text and text:match("^%s*(%x+)%s*$")
+  if v and #v >= 8 then
+    log(o, "GitHub's API was not reachable (" .. tostring(err) .. "); using " .. M.VERSION_FILE .. " on the branch")
+    return v:lower(), M.BRANCH
+  end
+  return nil, err, code
 end
 
 -- ---------------------------------------------------------------- download, check, stage
@@ -212,8 +224,9 @@ M.valid = valid
 
 --- The manifest and every file it lists at commit, checked: { man, text, blobs = { [to] = data } }, or nil, err.
 -- progress(done, total, path) as files come in. A keep file that is already installed is not fetched.
-function M.download(o, commit, progress)
-  local text, err = fetch(o, rawUrl(o, commit, o.manifest))
+function M.download(o, commit, progress, ref)
+  ref = ref or commit
+  local text, err = fetch(o, rawUrl(o, ref, o.manifest))
   if not text then return nil, "manifest: " .. tostring(err) end
   local man, perr = M.parse(text)
   if not man then return nil, perr end
@@ -221,7 +234,7 @@ function M.download(o, commit, progress)
   for i, f in ipairs(man.files) do
     if progress then progress(i - 1, #man.files, f.to) end
     if not (f.keep and o.fs.exists(f.to)) then
-      local data, ferr = fetch(o, rawUrl(o, commit, f.from))
+      local data, ferr = fetch(o, rawUrl(o, ref, f.from))
       if not data then return nil, f.to .. ": " .. tostring(ferr) end
       local ok, why = valid(f.to, data)
       if not ok then return nil, f.to .. ": " .. why end
@@ -229,6 +242,12 @@ function M.download(o, commit, progress)
     end
   end
   if progress then progress(#man.files, #man.files, nil) end
+  if ref ~= commit then
+    -- from the branch, not a fixed commit: refuse files that changed under the download (GitHub caches the branch)
+    local again = fetch(o, rawUrl(o, ref, M.VERSION_FILE))
+    local v = again and again:match("^%s*(%x+)%s*$")
+    if not v or v:lower() ~= commit then return nil, "the repository changed during the download" end
+  end
   return { man = man, text = text, blobs = blobs, commit = commit }
 end
 
@@ -338,8 +357,8 @@ function M.check(o)
       log(o, "update check failed: " .. st.lastError)
       return "failed: " .. st.lastError
     end
-    local commit, err, code = M.latest(o)
-    if not commit then return failed(err, code) end
+    local commit, ref, code = M.latest(o)
+    if not commit then return failed(ref, code) end
     if commit == st.commit then
       st.fails, st.backoffUntil = 0, nil
       M.writeState(o, st)
@@ -347,7 +366,7 @@ function M.check(o)
     end
     local ready = M.staged(o)
     if ready and ready.commit == commit then return "already staged" end
-    local got, derr = M.download(o, commit)
+    local got, derr = M.download(o, commit, nil, ref)
     if not got then return failed(derr) end
     local sok, serr = M.stage(o, got)
     if not sok then return failed(serr) end
@@ -364,13 +383,12 @@ end
 --- A fresh install (or a repair): main's commit, every file fetched and checked, then written. progress(done, total,
 -- path). Returns the commit, or nil, err (and then nothing was changed).
 function M.install(o, progress)
-  local commit, err, code = M.latest(o)
+  local commit, ref, code = M.latest(o)
   if not commit then
-    -- GitHub would not say (the rate limit): the branch itself still names the newest files
     if code == 403 or code == 429 then return nil, "GitHub is busy (rate limit): try again in a few minutes" end
-    return nil, err
+    return nil, ref
   end
-  local got, derr = M.download(o, commit, progress)
+  local got, derr = M.download(o, commit, progress, ref)
   if not got then return nil, derr end
   local ok, serr = M.stage(o, got)
   if not ok then return nil, serr end

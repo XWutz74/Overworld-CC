@@ -142,6 +142,9 @@ local function main()
   if not done then
     say("The install failed: " .. tostring(ierr), colours.red)
     say("Nothing was changed. Try again in a minute.", colours.red)
+    if tostring(ierr):find("secure connection", 1, true) then
+      say("Minecraft's Java does not trust GitHub's certificate. Updating Java (or the launcher) fixes it.", colours.yellow)
+    end
     return false
   end
   say("Installed version " .. done:sub(1, 7) .. ". " .. math.floor(fs.getFreeSpace("/") / 1024) .. " KB free.", colours.lime)

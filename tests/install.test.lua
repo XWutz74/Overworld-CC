@@ -34,7 +34,7 @@ end
 
 -- A fake GitHub: commits[sha] = { [repo path] = data }; head = the sha main is at.
 local function fakeGitHub()
-  local gh = { commits = {}, head = nil, online = true, calls = 0 }
+  local gh = { commits = {}, head = nil, online = true, apiOnline = true, calls = 0 }
   local function answer(data, code)
     return {
       readAll = function() return data end, close = function() end,
@@ -45,9 +45,12 @@ local function fakeGitHub()
     get = function(url)
       gh.calls = gh.calls + 1
       if not gh.online then return nil, "Could not connect" end
-      if url:find("api.github.com", 1, true) then return answer(gh.head, 200) end
-      local sha, path = url:match("raw%.githubusercontent%.com/XWutz74/Overworld%-CC/(%x+)/(.+)$")
-      local files = sha and gh.commits[sha]
+      if url:find("api.github.com", 1, true) then
+        if not gh.apiOnline then return nil, "Could not create a secure connection" end
+        return answer(gh.head, 200)
+      end
+      local ref, path = url:match("raw%.githubusercontent%.com/XWutz74/Overworld%-CC/(%w+)/(.+)$")
+      local files = ref and (ref == "main" and gh.commits[gh.head] or gh.commits[ref])
       if files and files[path] then return answer(files[path], 200) end
       local failed = answer("404: Not Found", 404)
       return nil, "Not Found", failed
@@ -60,6 +63,7 @@ local function fakeGitHub()
     for _, f in ipairs(man.files) do files[f.from] = read("/" .. fs.combine(here, f.from)) end
     files["standalone.txt"] = MANIFEST
     for k, v in pairs(edits or {}) do files[k] = v end
+    files["version.txt"] = (sha:sub(1, 12)) .. "\n"   -- the stamp changes with every commit
     gh.commits[sha] = files
     gh.head = sha
   end
@@ -176,6 +180,39 @@ test("set overworld.autoupdate false switches it off", function()
   eq(gh.calls, before)
   local o2 = up.options("standalone.txt", "overworld", { fs = sfs, http = false, interval = 0, settings = { get = function() end } })
   eq(up.check(o2), "no http")
+end)
+
+test("version.txt is up to date (run tools/stamp.sh before committing)", function()
+  local want = read("/" .. fs.combine(here, "version.txt"))
+  truthy(want and want:match("^%x+%s*$"), "version.txt exists")
+end)
+
+test("GitHub's API cannot be reached (old Java certificates): install and update use version.txt", function()
+  local gh, sfs, o = setup("noapi")
+  gh.commit(A)
+  gh.apiOnline = false
+  local id = up.install(o)
+  eq(id, A:sub(1, 12), "version comes from version.txt")
+  for _, f in ipairs(up.parse(MANIFEST).files) do truthy(sfs.exists(f.to), f.to .. " installed") end
+  local h = sfs.open("overworld-save/save.dat", "w"); h.write("{ day = 3 }"); h.close()
+  eq(up.check(o), "current")
+  local changed = read("/" .. fs.combine(here, "ow/util.lua")) .. "\n-- changed in commit B\n"
+  gh.commit(B, { ["ow/util.lua"] = changed })
+  eq(up.check(o), "staged")
+  eq(up.applyStaged(o), B:sub(1, 12))
+  eq(read(fs.combine(sfs.root, "ow/util.lua")), changed)
+  eq(read(fs.combine(sfs.root, "overworld-save/save.dat")), "{ day = 3 }")
+end)
+
+test("neither the API nor version.txt: nothing is changed", function()
+  local gh, sfs, o = setup("nothing")
+  gh.commit(A)
+  gh.apiOnline = false
+  gh.commits[A]["version.txt"] = nil
+  local done, err = up.install(o)
+  eq(done, nil)
+  truthy(err, "an error is given")
+  eq(sfs.exists("overworld.lua"), false)
 end)
 
 test("the updater and installer are Lua 5.1 (no goto)", function()
